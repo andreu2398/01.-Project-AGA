@@ -1,0 +1,270 @@
+---
+title: "Producción de cultivos con datos de la FAO"
+author: "Andreu Balastegui, Gerard Blasco, Albert Gastaldo"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, eval = TRUE, message = FALSE, warning  = FALSE)
+```
+
+```{r one}
+library(ggthemes)
+library(gapminder)
+library(tidyverse)
+library(rio)
+library(forcats)
+library(DT)
+library("rnaturalearth")
+library("rnaturalearthdata")
+library(gganimate)
+library(ggthemr)
+library(gghighlight)
+library(plotly)
+ggthemr("dust")
+world <- ne_countries(scale = "medium", returnclass = "sf")
+world <- world %>% filter(subregion != "Antarctica") %>% filter(admin != "Greenland")
+world <- world %>% select(subunit, iso_a3, geometry)
+df_p <- import("./Informe Big Data/FAOSTAT/Cultius/df_p.csv")
+df_y <- import("./Informe Big Data/FAOSTAT/Cultius/df_y.csv")
+df_ah <- import("./Informe Big Data/FAOSTAT/Cultius/df_ah.csv")
+```
+
+# Evolución mundial de los cultivos
+
+---
+
+```{r two, fig.width = 4, fig.height = 3}
+aa1 <- df_p %>% select(area , item_code , year , production) %>%
+    filter(area == "World") %>%
+    filter(item_code < 1000) %>%
+    group_by(year) %>%
+    summarise(prod_tot_anual = sum(production*100/2566008375 , na.rm = TRUE))
+
+aa2 <- df_ah %>% select(area , item_code , year , area_harvested) %>%
+    filter(area == "World") %>%
+    filter(item_code < 1000) %>%
+    group_by(year) %>%
+    summarise(ah_tot_anual = sum(area_harvested*100/971294535 , na.rm = TRUE))
+
+
+ggplot(aa1 , aes(x = year)) +
+    geom_line(mapping = aes(y = prod_tot_anual , color = prod_tot_anual)) +
+  geom_line(data = aa2 , mapping = aes(y = ah_tot_anual , color = ah_tot_anual)) +
+  scale_y_continuous(sec.axis = sec_axis(~.*1 , name = "Area Cultivada")) +
+  labs(title = "PRODUCCIÓN ANUAL MUNDIAL" , subtitle = "En números índice. 100 = Año 1961", x =   "Años" , y = "Producción Anual") +
+    scale_colour_gradientn(colours = rainbow(4)) +
+    transition_reveal(year) +
+    ease_aes('linear') +
+  theme(legend.position="none") +
+  annotate(geom = "text", x = 1980, y = 100, label = "Area", size = 5) +
+  annotate(geom = "text", x = 1980, y = 200, label = "Producción", size = 5)
+```
+
+# Los mayores productores en 2017
+
+---
+
+```{r three}
+df_p_paises_17 <- df_p %>% filter(area_code < 5000, year == 2017,
+                                  item_code < 1000, production >= 0,
+                                  area != "China, mainland") %>%
+  group_by(area) %>% summarise(total_prod = sum(production)) %>%
+  arrange(desc(total_prod)) %>% top_n(6) %>% mutate(area = as_factor(area))
+
+ggplot(df_p_paises_17, aes(x = area , y = total_prod/1000000000 , fill = area)) +
+  geom_col() +
+  labs(title = "MAYORES PRODUCTORES" , subtitle = "De mayor a menor, las respectivas cantidades producidas en el año 2017" , caption = "En miles de millones de toneladas" , x = "Productores" , y = "Producción Anual") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "none")
+```
+
+---
+
+```{r four, fig.width = 4.5, fig.height = 3}
+top_productors_17 <- c("China", "Brazil", "India", "United States of America", "Indonesia")
+
+df_p_paises <- df_p %>% filter(production >= 0, item_code < 1000, area_code < 5000,
+                               area %in% top_productors_17) %>%
+  group_by(year, area, area2) %>% summarise(production = sum(production)) %>%
+  mutate(production = production/1000000)
+
+df_p_paises2 <- df_p %>% filter(production >= 0, item_code < 1000, area_code < 5000,
+                               area2 == "Russia") %>%
+  group_by(year, area2) %>% summarise(production = sum(production)) %>%
+  mutate(production = production/1000000)
+
+ggplot(df_p_paises, aes(year, production, color = area)) +
+  geom_line() +
+  geom_line(data = df_p_paises2, aes(year, production, color = area2)) +
+  labs(title = "Producción", subtitle = "(millones de toneladas)", x = "Año", y = "Producción") +
+  transition_reveal(year)
+```
+
+# Los mayores cultivos en 2017
+
+---
+
+```{r five}
+bb <- df_p %>% select(item_code , item , area_code , area , year , production) %>%
+    filter(area_code == 5000) %>%
+    filter(year == 2017) %>%
+    filter(item_code < 1000) %>%
+    group_by(item , item_code) %>%
+    summarise(prod_tot_item = sum(production , na.rm = TRUE)) %>%
+    arrange(desc(prod_tot_item)) %>%
+    ungroup(item_code , item) %>%
+    top_n(6) %>%
+    mutate(item = as_factor(item))
+
+top_item <- bb$item
+top_item_code <- bb$item_code
+
+ggplot(data = bb , aes(x = item , y = prod_tot_item/1000000000 , fill = item)) +
+    geom_col() +
+  labs(title = "PRODUCTOS AGRÍCOLAS MÁS PRODUCIDOS" , subtitle = "De mayor a menor, las respectivas cantidades producidas en el año 2017" , caption = "En miles de millones de toneladas" , x = "Producto agrícola" , y = "Producción Anual") +
+    scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "none")
+```
+
+---
+
+```{r six}
+cc <- df_p %>% select(item_code , item , area_code , area , year , production) %>%
+    filter(area_code %in% c(5100 , 5200 , 5300 , 5400 , 5500)) %>%
+    filter(year == 2017) %>%
+    filter(item_code %in% top_item_code) %>%
+    group_by(area_code , area , item_code , item) %>%
+    summarise(prod_reg = sum(production , na.rm = TRUE)) %>%
+    ungroup(area_code , area , item_code , item) %>%
+    select(area , item , prod_reg)
+
+ggplot(data = cc , aes(x = area , y = prod_reg/1000000 , fill = area)) +
+    geom_col() +
+    facet_wrap(vars(item) , scales = "free") +
+  labs(title = "PRODUCCIÓN POR CONTINENTE" , subtitle = "Las respectivas cantidades producidas en el año 2017" , caption = "En millones de toneladas" , x = "Continente" , y = "Producción Anual") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1) , legend.position ="none")
+```
+
+---
+
+```{r nine, fig.width = 4, fig.height = 3}
+ddbis <- df_p %>% select(item_code , item , area_code , area , year , production) %>%
+    filter(area_code == 5000) %>%
+    filter(year == 2017) %>%
+    filter(item_code < 1000) %>%
+    group_by(item , item_code) %>%
+    summarise(prod_tot_item = sum(production , na.rm = TRUE)) %>%
+    arrange(desc(prod_tot_item)) %>%
+    ungroup(item_code , item) %>%
+    top_n(4) %>%
+    mutate(item = as_factor(item))
+top_item_4 <- ddbis$item
+top_item_code_4 <- ddbis$item_code
+dd <- df_y %>% select(item_code , item , area_code , area , year , yield) %>%
+    filter(area_code %in% c(5100 , 5200 , 5300 , 5400 , 5500)) %>%
+    filter(item_code %in% top_item_code_4) %>%
+    filter(year %in% c(1967 , 1977 , 1987 , 1997 , 2007 , 2017)) %>%
+    group_by(area_code , area , item_code , item , year) %>%
+    summarise(y_reg = sum(yield , na.rm = TRUE)) %>%
+    ungroup(area_code , area , item_code , item , year) %>%
+    select(area , item , y_reg , year)
+    
+    
+    ggplot(data = dd , aes(x = area , y = y_reg/10000 , fill = area)) +
+    geom_col() +
+    facet_wrap(vars(item) , scales = "free" , nrow = 1) +
+    transition_states(year , transition_length = 10 , state_length = 40) +
+    ease_aes('sine-in-out') +
+  labs(title = "EFICIENCIA AÑO: {closest_state}" , subtitle = "del 1967 al 2017" , caption = "En toneladas por hectárea" , x = "Continente" , y = "Eficiencia") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1) , legend.position = "none")
+```
+
+
+# Distribución geográfica
+
+---
+
+```{r seven, fig.width = 4, fig.height = 3}
+df_p_tot <- df_p %>% filter(production >= 0, item_code < 1000, area_code < 5000) %>%
+  group_by(year, area, area2) %>% summarise(production = sum(production))
+
+df_world <- inner_join(world, df_p_tot, by = c("subunit" = "area")) %>%
+  mutate(production = production/1000000)
+
+df_world2 <- inner_join(world, df_p_tot, by = c("subunit" = "area2")) %>%
+  mutate(production = production/1000000)
+
+ggplot() + geom_sf(data = world, fill = "black") +
+  geom_sf(data = df_world, aes(geometry = geometry, fill = production)) + theme_void() +
+  theme(panel.background = element_rect(fill = "aliceblue")) +
+  geom_sf(data = df_world2, aes(geometry = geometry, fill = production)) +
+  transition_manual(year) +
+  labs(title="Producción Total Año: {current_frame}", subtitle = "millones de toneladas") +
+  scale_fill_viridis_c(option = "plasma")
+```
+
+---
+
+```{r, fig.width = 4, fig.height = 3}
+df_p_rice <- df_p %>% filter(item == "Rice, paddy", production >= 0,
+                             item_code < 1000, area_code < 5000)
+
+df_world <- left_join(world, df_p_rice, by = c("subunit" = "area")) %>%
+  mutate(production = production/1000000)
+
+df_world2 <- inner_join(world, df_p_rice, by = c("subunit" = "area2")) %>%
+  mutate(production = production/1000000)
+
+ggplot() + geom_sf(data = world, fill = "black") +
+  geom_sf(data = df_world, aes(geometry = geometry, fill = production)) + theme_void() +
+  theme(panel.background = element_rect(fill = "aliceblue")) +
+  geom_sf(data = df_world2, aes(geometry = geometry, fill = production)) +
+  transition_manual(year) +
+  labs(title="Producción Arroz Año: {current_frame}", subtitle = "millones de toneladas") +
+  scale_fill_viridis_c(option = "plasma") +
+  coord_sf(xlim = c(60.00, 140.00), ylim = c(-10.00, 60.00), expand = FALSE)
+```
+
+---
+
+```{r, fig.width = 4, fig.height = 3}
+df_p_pa <- df_p %>% filter(item == "Oil palm fruit", production >= 0,
+                           item_code < 1000, area_code < 5000)
+
+df_world <- left_join(world, df_p_pa, by = c("subunit" = "area")) %>%
+  mutate(production = production/1000000)
+
+df_world2 <- inner_join(world, df_p_pa, by = c("subunit" = "area2")) %>%
+  mutate(production = production/1000000)
+
+ggplot() + geom_sf(data = world, fill = "black") +
+  geom_sf(data = df_world, aes(geometry = geometry, fill = production)) +theme_void() +
+  theme(panel.background = element_rect(fill = "aliceblue")) +
+  geom_sf(data = df_world2, aes(geometry = geometry, fill = production)) +
+  transition_manual(year) +
+  labs(title="Producción Palma Año: {current_frame}", subtitle = "millones de toneladas") +
+  scale_fill_viridis_c(option = "plasma") +
+  coord_sf(xlim = c(90.00, 170.00), ylim = c(-30.00, 30.00), expand = FALSE)
+```
+
+---
+
+```{r plot fin, fig.height = 3}
+fin <- inner_join(df_ah , df_p , by = c("area_code" = "area_code" , "area" = "area" , "item_code" = "item_code" , "item" = "item" , "year" = "year"))
+
+fin <- inner_join(df_y , fin ,  by = c("area_code" = "area_code" , "area" = "area" , "item_code" = "item_code" , "item" = "item" , "year" = "year"))
+
+fin1 <- fin %>% filter(year == 2017) %>%
+  select(item , area , yield , area_harvested , production) %>%
+  add_row(item = "Raw Bread (Pan crudo)", area = "Pancrudo" , yield = 104 , area_harvested = 1248 , production = 1.234)
+
+datatable(data = fin1 , options = list(), class = "display",
+    callback = JS("return table;"), rownames = FALSE , colnames = c('Cultivo (en inglés)', 'País/Región (en inglés)', 'Rendimiento (en hg/ha)' , 'Area cultivada (en hectáreas)' , 'Producción (en toneladas)') ,
+    caption = NULL, filter = c("none", "bottom", "top"), escape = FALSE,
+    style = "jqueryui", width = NULL, height = NULL, elementId = NULL,
+    fillContainer = getOption("DT.fillContainer", NULL),
+    autoHideNavigation = getOption("DT.autoHideNavigation", NULL),
+    selection = c("multiple", "single", "none"), extensions = list(),
+    plugins = "natural", editable = FALSE)
+```

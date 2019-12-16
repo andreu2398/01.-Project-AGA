@@ -1,0 +1,655 @@
+---
+title: "Project AGA"
+author: "Andreu Balastegui Tomàs, Gerard Blasco Granell i Albert Vicent Gastaldo Ortiz"
+date: "13/12/2019"
+output: 
+  html_document:
+    theme: united
+    toc: yes
+    toc_float: yes
+---
+
+# 0. PREPARACIÓN DEL PROJECTO:  
+
+## Motivación para la elección del tema
+
+Como economistas, las tres preguntas fundamentales a las que debemos responder són: "Qué se produce?" "¿Cómo se produce?" y "¿Para quién se produce?".
+
+Así mismo, es fundamental destacar que nuestro marco político de referencia es la Humanidad en su conjunto, por tanto, hemos dedicido por hacer un estudio que tenga en consideración los principales retos a los que esta se enfrenta. La superpoblación, la emergencia climática y el acceso a alimento y agua potable, son algunos de los retos imediatos a los que nos enfrentamos.   En nuestro caso, nos hemos centrado en la producción agraria a nivel global, especialmente en la produccion de alimentos (cultivos), puesto que en la actualidad siguen existiendo más de 800 millones de personas desnutridas en el mundo, de las cuales 11 millones mueren al año a causa del hambre (30.000 personas al dia) y más de 2000 millones sufren su amenaza.  Así pues, hemos acudido a las bases de datos de las que dispone la FAO (Food and Agriculture Organization) y hemos analizado la producción de alimentos (cultivos) y su evolución durante el período 1961 hasta 2017, ya que es el máximo período de tiempo de datos de los que dispone la FAO.
+
+## Configuración:  
+Configuramos las opciones de los *chunks* por defecto para que se vea el código (ya que esta asignatura es sobre R y no un informe "de verdad"), y que sí que se vean los mensajes de r o los *warnings*.
+
+```{r setup , include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Packages:  
+
+Invocamos todos los *packages* que vamos a utilizar y además configuramos un *theme* (`ggthemr("dust")`) con el *package* `ggthemr` para contar con un estilo uniforme en todo el project. Además, añadimos una línea de código que está desactivada / capada por si acaso el package `ggthemr` no está instalado en el RStudio en el que se está ejecutando.
+
+```{r packages}
+#devtools::install_github('cttobin/ggthemr')
+library(ggthemes)
+library(gapminder)
+library(rio)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(forcats)
+library(ggthemr)
+library(DT)
+library(gganimate)
+library(rnaturalearth)
+library(rnaturalearthdata)
+ggthemr("dust")
+```
+
+## Importación:  
+
+Seguidamente, importamos los *dataframes* que hemos descargado sobre los cuales haremos todo el *tidy* para quedarnos con los *dataframes* finales que usaremos en nuestro análisis.  
+En el *dataframe* llamado `data_wide`, provisto por FAOSTAT tenemos los datos de Cultivos del año 1961 al 2017. En el siguiente apartado veremos cómo tratamos el hecho de tener una variable por año llamadas `Y{current_year}`. Es decir, cómo tratamos este *dataframe* **ancho** y con datos mezclados.  
+En el *dataframe* llamado `data_wide2`, provisto por FAOSTAT tenemos los datos de Ramadería del año 1961 al 2017. Aunque estos datos resulten muy necesarios para un análisis preciso del Sector Primario y de la producción de alimento a nivel global, hacer uso de ellos **alargaría** en gran medida este **trabajo** y la **exposición del mismo** e incluso lo podría hacer menos preciso al no poder dedicar el tiempo necesario a cada parte. Por si algún día queremos perfeccionar el trabajo o acabar el análisis, dejamos la línea de código (anulada / capada).
+
+```{r importación}
+data_wide <- import("./Bases de Dades/FAOSTAT/Cultius/Production_NOFLAG.csv")
+#data_wide2 <- import("./Bases de Dades/FAOSTAT/Ramaderia/Production_LivestockPrimary_E_All_Data_NOFLAG.csv")
+world <- ne_countries(scale = "medium", returnclass = "sf") %>%
+  select(subunit , geometry)
+```
+
+## *Tidy*:  
+
+Antes de hacer cada *tidy* para responder a cada pregunta hemos hecho un *tidy* inicial en el que sacamos tres *dataframes* **sin** `geometry` y tres **con** `geometry` (los que tienen la `_g` al final). Es cierto que podríamos haber hecho tres en lugar de seis pero los datos de FAOSTAT no tenían datos de `geometry`, los cuales considerábamos necesarios para representar algunas conclusiones, y el hecho de tener hacer un `left_join` entre *dataframes* diferentes hacía que perdiéramos observaciones ya que los nombres de países no cuadran al milímetro. Además, al ordenador le cuesta más trabajar con los datos de `geometry`, así que siempre que no fuera necesario, preferíamos trabajar sin ellos.  
+
+Ante esto, decidimos crear un *dataframe* por cada **elemento de análisis**:  
+    1. df_ah(_g): *dataframe area harvested*, contiene los datos de **hectáreas cultivadas** de cada cultivo (o grupo de cultivos) por países, regiones y continentes.  
+    2. df_p(_g): *dataframe production*, contiene los datos de **toneladas cosechadas** de cada cultivo (o grupo de cultivos) por países, regiones y continentes.  
+    3. df_y(_g): *dataframe yield*, contiene los datos de **eficiencia** en hectogramos por hectárea de cada cultivo (o grupo de cultivos) por países, regiones y continentes.
+    
+### *Join*:  
+
+Usamos la función left_join para unir `world` y `data_wide`. En `world`, los países están en la variable *subunit* y en `data_wide` están en una llamada *Area*. Para que no se quede el nombre de *subunit*, usamos la función `rename()` para volver a llamarla *Area*.
+
+```{r tidy_join , eval = FALSE}
+data_wide_g <- left_join(world, data_wide, by = c("subunit" = "Area"))
+data_wide_g <- data_wide_g %>% rename(Area = subunit)
+```
+
+### df_ah(_g)
+
+En el primer *data frame* pretendemos obtener la superfície cultivada por países. Por tanto, lo primero que hacemos es filtrar por la variable "Area harvested". Posteriormente, aunque tenemos los datos en  *wide*, para que sean *"tidy-tidy"* y sacar todo el provecho a tidyverse los transformamos a formato *long*. Para ello utilizaremos la función *gather* (equivalente a *pivot_longer*), y que tal cómo prometió **Hadley Wickham**, sigue funcionando. Así pues, la función la haremos sobre las columnas 8 a 64, que es donde se encuentra cada año como una variable diferente, para convertirlas en una sola variable año, y donde el año en cuestión sea el dato de la variable año.  
+
+Para nuestro pesar, encontramos una inesperada dificultad. Como el nombre de cada año tenía la coletilla "Y", no nos dejaba transformar los datos. Así pues, para solucionar dicho problema, decidimos dividir la variable año en dos variables *rem* y *year* para poder eliminar la coletilla "Y". Luego, para evitar problemas con los nombres de las variables, decidimos modificar dichos nombres, de tal modo que eliminamos las mayúsculas y los espacios. También hemos cambiado el tipo de datos de la variable *year* ya que inicialmente estava cómo *character* y lo hemos transformado a *numeric*. Posteriormente, una vez ya transformados los datos a *long*, eliminamos la variable *rem*, ya que no nos sirve para nada más. Para finalizar de ordenar este *data frame*, añadimos una nueva columna *year* que sustituya la variable anterior eliminada por estar en caracteres.  
+
+Para el caso del data frame de area cultivada con los datos *geometrics*, hacemos exactamente el mismo procedimiento que hemos hecho con el data frame anterior, con el añadido de filtrar por *area_code* menor a 5.000, ya que en esta variable, las regiones y el mundo aparecen con un códido igual o superior a 5.000. Por tanto, filtramos las regiones para quedarnos con los datos de los estados.  
+
+```{r tidy_ah , eval = FALSE}
+df_ah <- data_wide %>% filter(Element == "Area harvested") %>%
+    gather(year, area_harvested, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year)
+df_ah_year <- as.numeric(df_ah$year_rem)
+df_ah$year_rem = NULL
+df_ah$rem = NULL
+df_ah <- df_ah %>%
+    add_column("year" = df_ah_year)
+
+df_ah_g <- data_wide_g %>% filter(Element == "Area harvested") %>%
+    gather(year, area_harvested, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year) %>%
+  filter(area_code < 5000)
+df_ah_g_year <- as.numeric(df_ah_g$year_rem)
+df_ah_g$year_rem = NULL
+df_ah_g$rem = NULL
+df_ah_g <- df_ah_g %>%
+  add_column("year" = df_ah_g_year)
+```
+
+### df_y(_g) & df_p(_g)
+
+Haremos exactamente lo mismo para el resto de *data frames*, con la diferencia de la variable por la cual filtramos. Por la variable *production* para los *data frames* de producción en terminos absolutos, y por la variable *Yield* para los de productividad.  
+
+```{r tidy_y&tidy_g , eval = FALSE}
+df_y <- data_wide %>% filter(Element == "Yield") %>%
+    gather(year, yield, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year)
+df_y_year <- as.numeric(df_y$year_rem)
+df_y$year_rem = NULL
+df_y$rem = NULL
+df_y <- df_y %>%
+    add_column("year" = df_y_year)
+
+df_y_g <- data_wide_g %>% filter(Element == "Yield") %>%
+    gather(year, yield, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year)
+df_y_g_year <- as.numeric(df_y_g$year_rem)
+df_y_g$year_rem = NULL
+df_y_g$rem = NULL
+df_y_g <- df_y_g %>%
+    add_column("year" = df_y_g_year)
+
+df_p <- data_wide %>% filter(Element == "Production") %>%
+    gather(year, production, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year)
+df_p_year <- as.numeric(df_p$year_rem)
+df_p$year_rem = NULL
+df_p$rem = NULL
+df_p <- df_p %>%
+    add_column("year" = df_p_year)
+df_p_g <- data_wide_g %>% filter(Element == "Production") %>%
+    gather(year, production, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year)
+df_p_g_year <- as.numeric(df_p_g$year_rem)
+df_p_g$year_rem = NULL
+df_p_g$rem = NULL
+df_p_g <- df_p_g %>%
+    add_column("year" = df_p_g_year)
+```
+
+### *remove* (`rm`)
+
+Para finalizar este largo y tedioso ordenado procedimiento de *tidy*, borramos todos los objetos que no utilizaremos más con la función *rm()*, quedándonos con los tres data frames que pretendíamos obtener. Con la concusión de que la fase más árdua y costosa de realizar en un análisis de datos es, efectivamente, el *tidy*.  
+
+```{r tidy_rm , eval = FALSE}
+rm(data_wide , data_wide_g , data_wide2 , df_ah_year , df_ah_g_year , df_p_year , df_p_g_year , df_y_year , df_y_g_year)
+```
+
+```{r tidy , echo = FALSE}
+data_wide_g <- left_join(world, data_wide, by = c("subunit" = "Area"))
+data_wide_g <- data_wide_g %>% rename(Area = subunit)
+
+df_ah <- data_wide %>% filter(Element == "Area harvested") %>%
+    gather(year, area_harvested, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year)
+df_ah_year <- as.numeric(df_ah$year_rem)
+df_ah$year_rem = NULL
+df_ah$rem = NULL
+df_ah <- df_ah %>%
+    add_column("year" = df_ah_year)
+
+df_ah_g <- data_wide_g %>% filter(Element == "Area harvested") %>%
+    gather(year, area_harvested, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year) %>%
+  filter(area_code < 5000)
+df_ah_g_year <- as.numeric(df_ah_g$year_rem)
+df_ah_g$year_rem = NULL
+df_ah_g$rem = NULL
+df_ah_g <- df_ah_g %>%
+  add_column("year" = df_ah_g_year)
+
+df_y <- data_wide %>% filter(Element == "Yield") %>%
+    gather(year, yield, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year)
+df_y_year <- as.numeric(df_y$year_rem)
+df_y$year_rem = NULL
+df_y$rem = NULL
+df_y <- df_y %>%
+    add_column("year" = df_y_year)
+
+df_y_g <- data_wide_g %>% filter(Element == "Yield") %>%
+    gather(year, yield, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year)
+df_y_g_year <- as.numeric(df_y_g$year_rem)
+df_y_g$year_rem = NULL
+df_y_g$rem = NULL
+df_y_g <- df_y_g %>%
+    add_column("year" = df_y_g_year)
+
+df_p <- data_wide %>% filter(Element == "Production") %>%
+    gather(year, production, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year)
+df_p_year <- as.numeric(df_p$year_rem)
+df_p$year_rem = NULL
+df_p$rem = NULL
+df_p <- df_p %>%
+    add_column("year" = df_p_year)
+df_p_g <- data_wide_g %>% filter(Element == "Production") %>%
+    gather(year, production, 8:64) %>%
+    separate(year, c("rem", "year"), sep = "Y") %>%
+    rename(area_code = "Area Code" , area = Area , item_code = "Item Code" , item = Item , element_code = "Element Code" , element = Element , unit = Unit , year_rem = year)
+df_p_g_year <- as.numeric(df_p_g$year_rem)
+df_p_g$year_rem = NULL
+df_p_g$rem = NULL
+df_p_g <- df_p_g %>%
+    add_column("year" = df_p_g_year)
+
+rm(data_wide , data_wide_g , data_wide2 , df_ah_year , df_ah_g_year , df_p_year , df_p_g_year , df_y_year , df_y_g_year)
+
+
+```
+### Recodificar variable
+
+Este paso es necesario para proyectar satisfactoriamente grográficamente todos los países del mundo, dado que los nombres de los países es la variable con la que unimos los datos geográficos de *world* con los de producciones de cultivos *df_p*, para ello necessitamos que los nombres sean idénticos. Lo que hemos hecho es crear una nueva variable en *df_p*, esta nueva variable *area2* contiene los nombres de los paises de *world* que corresponden con los paises de *df_p*, paso que hemos hecho manualmente. Con todo esto, a la hora de unir los datos en un *data.frame* creamos dos *data.frame*, *df_world* y *df_world2*, el primero donde unimos por *area* y el segundo por *area2*. Luego en la explicación del *tidy* de los mapas seguiremos desarrollando más sobre esta parte.
+
+```{r tidy recodificar , eval = TRUE}
+area.t <- as.character(df_p$area)
+area2 <- vector()
+area2[area.t == "Russian Federation"] <- "Russia"
+area2[area.t == "USSR"] <- "Russia"
+area2[area.t == "Viet Nam"] <- "Vietnam"
+area2[area.t == "Venezuela (Bolivarian Republic of)"] <- "Venezuela"
+area2[area.t == "China, Taiwan Province of"] <- "Taiwan"
+area2[area.t == "Syrian Arab Republic"] <- "Syria"
+area2[area.t == "Eswatini"] <- "Swaziland"
+area2[area.t == "Serbia"] <- "Republic of Serbia"
+area2[area.t == "Republic of Korea"] <- "South Korea"
+area2[area.t == "Iran (Islamic Republic of)"] <- "Iran"
+area2[area.t == "Guinea-Bissau"] <- "Guinea Bissau"
+area2[area.t == "Micronesia (Federated States of)"] <- "Federated States of Micronesia"
+area2[area.t == "Czechia"] <- "Czech Republic"
+area2[area.t == "Democratic Republic of the Congo"] <- "Republic of Congo"
+area2[area.t == "Brunei Darussalam"] <- "Brunei"
+area2[area.t == "Bolivia (Plurinational State of)"] <- "Bolivia"
+area2[area.t == "Somalia"] <- "Somaliland"
+area2[area.t == "United Republic of Tanzania"] <- "Tanzania"
+area2 <- as.character(area2)
+df_p$area2 <- area2
+```
+### Algunas consideraciones de los datos ordenados
+
+Es fundamental conocer bien nuestros datos para obtener lo resultados buscados. Por ejemplo, si nos fijamos en la variable *area_code*, los valores inferiores a 5000 són para los países, el valor 5000 es para el mundo en su conjunto y los valores superiores a 5000 són para los continentes y regiones. Concretamente, las centenas són para los continentes (5100, 5200, etc.) y las decenas para regiones de dentro de dicho continente (5110, 5120, etc.).  Además, como podemos ver, tenemos 180 items de alimentos. Los alimentos con código superior a 1000 son sumatorios y cantidades agregadas.
+
+# ¿CUÁL ES LA PRODUCCIÓN AGRARIA A NIVEL GLOBAL?
+
+## ¿Por qué esta pregunta?
+
+Lo primero es saber la produccion global a nivel agregado, para saber si el problema del hambre y desnutrición en el mundo es la escasa producción para la población mundial existente.
+
+## Tidy de la pregunta
+
+Primero seleccionamos las variables que nos interesan, para luego filtrar que el `area` sea el mundo y que el `item_code` sea **menor a 1000**, es decir, todos los productos por separado, **sin agregados** de tipos de productos. Entonces agrupamos por años y sumamos todos los items para obtener la producción total anual. Dado que queremos comparar las evoluciones, lo pasamos a números índice dividiendo por el valor inicial de la serie.
+
+```{r tidy aa}
+aa1 <- df_p %>% select(area , item_code , year , production) %>%
+    filter(area == "World") %>%
+    filter(item_code < 1000) %>%
+    group_by(year) %>%
+    summarise(prod_tot_anual = sum(production*100/2566008375 , na.rm = TRUE))
+
+aa2 <- df_ah %>% select(area , item_code , year , area_harvested) %>%
+    filter(area == "World") %>%
+    filter(item_code < 1000) %>%
+    group_by(year) %>%
+    summarise(ah_tot_anual = sum(area_harvested*100/971294535 , na.rm = TRUE))
+```
+
+## Representación de la respuesta
+
+Dado que queríamos representar dos elementos en este gráfico (producción y area cultivada), realizamos un ggplot con **dos** *ejes y* (con `sec.axis`). No nos quedamos ahí, sino que para hacerlo más llamativo lo hacemos dinámico y con un color de la `geom_line` "un poco especial". Finalmente, añadimos todas las `labs`, unas anotaciones y quitamos la leyenda para que quede un gráfico presentable y que transmita lo que queríamos.
+
+```{r plot aa}
+ggplot(aa1 , aes(x = year)) +
+    geom_line(mapping = aes(y = prod_tot_anual , color = prod_tot_anual)) +
+  geom_line(data = aa2 , mapping = aes(y = ah_tot_anual , color = ah_tot_anual)) +
+  scale_y_continuous(sec.axis = sec_axis(~.*1 , name = "Area Cultivada")) +
+  labs(title = "PRODUCCIÓN AGRÍCOLA MUNDIAL" , subtitle = "Evolución anual (de 1961 a 2017) dinámica de la producción y area cultivada agregada" , caption = "En números índice 100 = Año 1961" , x = "Años" , y = "Producción Anual") +
+    scale_colour_gradientn(colours = rainbow(4)) +
+    transition_reveal(year) +
+    ease_aes('linear') +
+  theme(legend.position="none") +
+  annotate(geom = "text", x = 1980, y = 100, label = "Area", size = 5) +
+  annotate(geom = "text", x = 1980, y = 200, label = "Producción", size = 5)
+```
+
+## Conclusiones
+
+La producción mundial es más que suficiente para alimentar a las casi 8000 millones de personas que viven acutalmente en el mundo, aunque una cosa sí es cierta: si nos acordamos del modelo de Malthus, él decía que la población crecía exponencialmente y que la producción lo hace de manera lineal debido al aumento de la superficie cultivada. En nuestro caso, efectivamente la producción crece de manera lineal, pero con una pendiente mucho más elevada que la superfície cultivada (que apenas crece).
+
+# ¿CUÁLES SON LOS ALIMENTOS MÁS PRODUCIDOS EN LA ACTUALIDAD?
+
+## ¿Por qué esta pregunta?
+
+No solo importa la cantidad en términos absolutos, sinó también cuáles són los alimentos más producidos en cuestión de toneladas, ya que no todos aportan el mismo valor calórico, etc. Además, esto nos servirá para realizar otros análisis en las preguntas posteriores.
+
+## Tidy de la pregunta
+
+Selecionamos las variables que nos interesan, luego filtramos por el `area_code` del planeta, filtramos por el año en cuestión (2017), elegimos los productos de manera no agregada, entonces agrupamos los ítems por su cógido y hacemos el sumatorio para obtener la producción de cada tipo de alimento, los ordenamos de mayor a menor y desagrupamos, entonces seleccionamos los 6 primeros y convertimos la variable *item* a factor para guardarnos estos ítems como vectores y poder usarlos en próximas preguntas en las que necesitemos los seis cultivos más producidos.
+
+```{r tidy bb}
+bb <- df_p %>% select(item_code , item , area_code , area , year , production) %>%
+    filter(area_code == 5000) %>%
+    filter(year == 2017) %>%
+    filter(item_code < 1000) %>%
+    group_by(item , item_code) %>%
+    summarise(prod_tot_item = sum(production , na.rm = TRUE)) %>%
+    arrange(desc(prod_tot_item)) %>%
+    ungroup(item_code , item) %>%
+    top_n(6) %>%
+    mutate(item = as_factor(item))
+
+top_item <- bb$item
+top_item_code <- bb$item_code
+```
+
+## Representación de la respuesta
+
+Realizamos un `ggplot` de barras, ajustando la escala del *eje y* dividiendo por mil millones. Además, quitamos la leyenda porque no le encontramos utilidad en este gráfico. Finalmente, cambiamos la `palette` de colores para hacerlo más bonito.
+
+```{r plot bb}
+ggplot(data = bb , aes(x = item , y = prod_tot_item/1000000000 , fill = item)) +
+    geom_col() +
+  labs(title = "PRODUCTOS AGRÍCOLAS MÁS PRODUCIDOS" , subtitle = "De mayor a menor, las respectivas cantidades producidas en el año 2017" , caption = "En miles de millones de toneladas" , x = "Producto agrícola" , y = "Producción Anual") +
+    scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "none")
+```
+
+## Conclusiones
+
+Los 6 alimentos más producidos de mayor a menor són: Caña de Azúcar, Trigo, Arroz, Maiz, y soja. Se puede observar que 3 de los 4 productos más producidos a nivel global són cereales, los cuáles tienen un gran aporte calórico, especialmente de hidratos de carbono. Por tanto, són alimentos que ayudarian a que la población mundial ingiriese la cantidad de kilocalorías necesarias.
+
+# ¿CÓMO DE EFICIENTE ES CADA CONTINENTE EN LOS `top_items`?
+
+## ¿Por qué esta pregunta?
+
+Si la producción ha aumentado mucho más de lo que lo ha hecho el area cultivada, tal cómo hemos visto, intuimos que se debe a un aumento de la eficiencia en los cultivos. Queremos ver dónde se ha producido un mayor incremento de la productividad a causa de la denominada "revolución verde", si esto ha tenido un impacto positivo en la reducción del hambre en las regiones donde más se ha incrementado la productividad y si este puede ser el camino a seguir para aquella regiones donde persiste el hambre.
+
+## Tidy de la pregunta
+
+Filtramos el `area_code` para que nos de los valores de eficiencia de la tierra por continentes, y el `item_code` para que lo haga de los cultivos más producidos que nos hemos guardado anteriormente. Agrupamos todas las variables menos `yield` y hacemos un sumatorio de esta; finalmente desagrupamos y seleccionamos las variables que usaremos en el plot siguiente.
+
+```{r tidy bis}
+bis <- df_y %>% select(item_code , item , area_code , area , year , yield) %>%
+    filter(area_code %in% c(5100 , 5200 , 5300 , 5400 , 5500)) %>%
+    filter(item_code %in% top_item_code) %>%
+    filter(year %in% c(1967 , 1977 , 1987 , 1997 , 2007 , 2017)) %>%
+    group_by(area_code , area , item_code , item , year) %>%
+    summarise(y_reg = sum(yield , na.rm = TRUE)) %>%
+    ungroup(area_code , area , item_code , item , year) %>%
+    select(area , item , y_reg , year)
+```
+
+## Representación de respuesta
+
+Queremos ver cómo ha evolucionado la eficiencia de los cultivos, pero a la vez queremos ver realmente la diferencia entre continentes en materia de eficiencia. Además, si hacemos un `facet_wrap` según los cultivos podemos ver también en qué cultivos de los más producidos ha aumentado más la eficiencia.  
+Para empezar, para tener la variable *y* en **toneladas por hectárea** en lugar de hectogramos por hectárea, dividimos esta variable entre 10.000. Realizamos un `geom_col` para hacer el gráfico de barras, el *faceting* con `facet_wrap` según el cultivo. Si nos fijamos, anteriormente hemos filtrado la variable `year` por cada diez años del 1967 al 2017, ya que el hecho de hacerlo dinámico es para ver la **evolución de la eficiencia**, y poner todos los años habría retrasado la ejecución del `ggplot` unos dos minutos por *kniteo* (por eso ponerlo cada 10 años también nos permite ver la evolución y libera carga de trabajo a RStudio).  
+Finalmente, como de costumbre, añadimos unas `labs` para dejar presentable este `ggplot` y como los nombres de los continentes se montaban los ponemos en vertical con `element_text(angle = 90, hjust = 1)`. Una vez más, quitamos la leyenda dado que no es necesaria en este caso.
+
+```{r plot bis}
+ggplot(data = bis , aes(x = area , y = y_reg/10000 , fill = area)) +
+    geom_col() +
+    facet_wrap(vars(item) , scales = "free") +
+    transition_states(year , transition_length = 10 , state_length = 40) +
+    ease_aes('sine-in-out') +
+  labs(title = "EFICIENCIA AÑO: {closest_state}" , subtitle = "Las respectivas eficiencias de la tierra del 1967 al 2017" , caption = "En toneladas por hectárea" , x = "Continente" , y = "Eficiencia") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1) , legend.position = "none")
+```
+
+## Conclusiones
+
+Efectivamente, podemos observar a lo largo de las décadas, cómo la productividad se ha incrementado mucho más en América, Asia o Oceania que en África. De hecho, en 1967 se puede apreciar que la productividad por hectárea entre Asia y África era prácticamente la misma. Sin embargo, en el 2017, la productividad de Asia, practicamente triplica la de África. Incluso es más, todos los continentes incrementan su productividad década tras década, mientras que África, incluso llega a disminuir su productividad durante el período 1977-1987. Así pues, hay mucho margen de mejora de la productividad en el continente africano que pueda llevar a reducir significativamente el hambre en el mundo.
+
+# ¿QUIÉN PRODUCE ESTOS ALIMENTOS?
+
+## ¿Por qué esta pregunta?
+
+Hay que saber en que regiones o continentes se produce los alimentos, puesto que esto es relevante a la hora de la distribución y el acceso a dichos alimentos. 
+
+## Tidy de la pregunta
+
+Primero seleccionamos las variables que necesitamos y filtramos por el código del área que se corresponde con los 5 continentes, fitramos por el año 2017, entonces seleccionamos los códigos de ítems de mayor número y agrupamos por area e ítem, hacemos el sumatorio de la producción para obtener la producción por continentes,desagrupamos y seleccionamos las variables que necesitamos para el plot, en este caso la producción por continentes.
+
+```{r tidy cc1}
+cc1 <- df_p %>% select(item_code , item , area_code , area , year , production) %>%
+    filter(area_code %in% c(5100 , 5200 , 5300 , 5400 , 5500)) %>%
+    filter(year == 2017) %>%
+    filter(item_code %in% top_item_code) %>%
+    group_by(area_code , area , item_code , item) %>%
+    summarise(prod_reg = sum(production , na.rm = TRUE)) %>%
+    ungroup(area_code , area , item_code , item) %>%
+    select(area , item , prod_reg)
+```
+
+Vamos a ver algo parecido pero viéndolo por países y para todos los cultivos. Quitamos `"China, mainland"` porque es un equivalente a China y salía en segunda posición con prácticamente la misma producción.
+
+```{r tidy cc2}
+cc2 <- df_p %>% filter(area_code < 5000, year == 2017 , item_code < 1000 , production >= 0, area != "China, mainland") %>%
+  group_by(area) %>%
+  summarise(production = sum(production , na.rm = TRUE)) %>%
+  arrange(desc(production)) %>%
+  top_n(6) %>%
+  mutate(area = as_factor(area))
+```
+
+## Representación de respuesta
+
+Este `ggplot` tiene una estructura parecida a la del apartado anterior, pero en este caso se trata de la "Producción por continente" y no es dinámico porque en esta pregunta no nos interesaba la evolución, sino la situación actual.
+
+```{r plot cc1}
+ggplot(data = cc1 , aes(x = area , y = prod_reg/1000000 , fill = area)) +
+    geom_col() +
+    facet_wrap(vars(item) , scales = "free") +
+  labs(title = "PRODUCCIÓN POR CONTINENTE" , subtitle = "Las respectivas cantidades producidas en el año 2017" , caption = "En millones de toneladas" , x = "Continente" , y = "Producción Anual") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1) , legend.position ="none")
+```
+
+Este `ggplot` también tiene una estructura parecida al de mayores cultivos en la actualidad, pero ahora nos interesa representar los países que más cultivos producen.
+
+```{r plot cc2}
+ggplot(cc2, aes(x = area , y = production/1000000000 , fill = area)) +
+  geom_col() +
+  labs(title = "MAYORES PRODUCTORES" , subtitle = "De mayor a menor, las respectivas cantidades producidas en el año 2017" , caption = "En miles de millones de toneladas" , x = "Producto agrícola" , y = "Producción Anual") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "none")
+```
+
+## Conclusiones
+
+La mayor parte de la producción mundial se encuentra en Asia, puesto que es el continente de mayor extensión con diferencia y dónde además, es donde vive prácticamente la mitad de la población mundial. Así pues, Asia alberga a cuatro de los seis mayores productores agrários del mundo: China (1), Índia (3), Indonesia (5) y Rússia (6). Por otro lado, no podemos obviar a América, donde Brasil y Estados Unidos, a causa de su gran extensión, de sus condiciones climáticas y técnicas agrárias, són el segundo y cuarto productor mundial respectivamente.
+
+# ¿CÓMO HAN LLEGADO HASTA AQUÍ?
+
+## ¿Por qué esta pregunta?
+
+No sólo es importante ver qué paises son los que más alimentos producen sino que es interesante conocer cómo ha sido su evolución hasta llegar a ser los mayores productores de Cultivos del mundo.
+
+## Tidy de la pregunta
+
+Guardamos los nombres de los6 mayores productores menos Rusia (que añadiremos más tarde) en un vector de carácteres. Luego, en *df_p_paises* agrupamos y usamos *summarise* para sumar las producciones de cada año de cada país. Para *df_p_paises2* hacemos lo mismo pero solo para Rusia.
+
+```{r tidy dd}
+top_productors_17 <- c("China", "Brazil", "India", "United States of America", "Indonesia")
+
+df_p_paises <- df_p %>% filter(production >= 0, item_code < 1000, area_code < 5000,
+                               area %in% top_productors_17) %>%
+  group_by(year, area) %>% summarise(production = sum(production)) %>%
+  mutate(production = production/1000000)
+
+df_p_paises2 <- df_p %>% filter(production >= 0, item_code < 1000, area_code < 5000,
+                               area2 == "Russia") %>%
+  group_by(year, area2) %>% summarise(production = sum(production)) %>%
+  mutate(production = production/1000000)
+```
+
+## Representación de respuesta
+
+Generamos un gráfico de lineas pero en una capa añadimos los primeros 5 países y en otra solo Rusia. Posteriormente, utilizamos la función *transition_reveal()* del paquete *gganimate* para ver la evolución.
+
+```{r plot dd}
+ggplot(df_p_paises, aes(year, production, color = area)) +
+  geom_line() +
+  geom_line(data = df_p_paises2, aes(year, production, color = area2)) +
+  labs(title = "Producción (millones de toneladas)", x = "Año", y = "Producción") +
+  transition_reveal(year)
+```
+
+## Conclusiones
+
+En el gráfico apreciamos cómo en la década de los 60 se encontraban estos seis países en niveles de producción muy similares, mientras que en la actualidad China ha creado una gran brecha con el resto e India y Brasil ocupan una posición secundaria a cierta distancia de Estados Unidos, Rusia e Indonesia. Cabe añadir que la trayectoria de Rusia no es exacta al tratarse de los datos de producción de la URSS los correspondientes a los años anteriores a la década de los 90.
+
+# ¿CÓMO SE DISTRIBUYE LA PRODUCCIÓN A LO LARGO Y ANCHO DEL GLOBO?
+
+## ¿Por qué esta pregunta?
+
+Reflejar datos de producción sobre proyecciones geográficas siempre puede aportarnos perspectivas muy reveladoras y significantes para entender mejor el tema en cuestión.
+
+## Tidy de la pregunta
+
+Como ya hemos dicho anteriorimente en el apartado de *Recalificación de variables* creamos dos data.frames que unen los datos de la FAO con los de *world*, de manera que a la hora de graficarlos cada uno de ellos pertenece a una capa diferente, pero que conjuntamente forman el mapa mundial practicamente completo.
+
+```{r tidy ee}
+df_p_tot <- df_p %>% filter(production >= 0, item_code < 1000, area_code < 5000) %>%
+  group_by(year, area , area2) %>% summarise(production = sum(production))
+
+df_world <- inner_join(world, df_p_tot, by = c("subunit" = "area")) %>%
+  mutate(production = production/1000000)
+
+df_world2 <- inner_join(world, df_p_tot, by = c("subunit" = "area2")) %>%
+  mutate(production = production/1000000)
+```
+
+## Representación de respuesta
+
+Respecto a la proyección animada, utilizamos la función *transition_manual()* del paquete *gganimate* para visualizar la evolución temporal. En una primera capa añadimos los territorios de *df_world* que son los que comparten denominación entre *world* y *df_p*, y después *df_world2* que contiene varios países que no comparten denominación. Añadimos una capa base que contiene los datos de world y los territorios pintados de negro para no ver vacíos en el mapamundi. Pintamos los oceanos con la función *theme()* y visualizamos los cambios de producción con *scale_fill_viridis_c()* y con el tema plasma.
+
+```{r plot ee}
+ggplot() + geom_sf(data = world, fill = "black") +
+  geom_sf(data = df_world, aes(geometry = geometry, fill = production)) + theme_void() +
+  theme(panel.background = element_rect(fill = "aliceblue")) +
+  geom_sf(data = df_world2, aes(geometry = geometry, fill = production)) +
+  transition_manual(year) +
+  labs(title="Producción de cultivos (millones de toneladas) Año: {current_frame}") +
+  scale_fill_viridis_c(option = "plasma")
+```
+
+## Conclusiones
+
+Las conclusión de este mapamundi es la preponderancia de Asia en la producción agrícola y la brecha con el resto del planeta.
+
+# ¿CUÁL ES LA DISTRIBUCIÓN GEOGRÁFICA DEL ARROZ?
+
+## ¿Por qué esta pregunta?
+
+El arroz es un cultivo de enorme importancia para la humanidad, por tanto nos interesa ver su situación geográfica junto a su evolución.
+
+## Tidy de la pregunta
+
+El tidy es el mismo que el del mapa anterior, con la única diferencia del filtrado por el cultivo del arroz.
+
+```{r tidy ff}
+df_p_rice <- df_p %>% filter(item == "Rice, paddy", production >= 0,
+                             item_code < 1000, area_code < 5000)
+
+df_world <- left_join(world, df_p_rice, by = c("subunit" = "area")) %>%
+  mutate(production = production/1000000)
+
+df_world2 <- inner_join(world, df_p_rice, by = c("subunit" = "area2")) %>%
+  mutate(production = production/1000000)
+```
+
+## Representación de respuesta
+
+El plot es el mismo con la única diferencia de que hacemos zoom en China con *coord_sf()*.
+
+```{r plot ff}
+ggplot() + geom_sf(data = world, fill = "black") +
+  geom_sf(data = df_world, aes(geometry = geometry, fill = production)) + theme_void() +
+  theme(panel.background = element_rect(fill = "aliceblue")) +
+  geom_sf(data = df_world2, aes(geometry = geometry, fill = production)) +
+  transition_manual(year) +
+  labs(title="Producción de arroz (millones de toneladas) Año: {current_frame}") +
+  scale_fill_viridis_c(option = "plasma") +
+  coord_sf(xlim = c(60.00, 140.00), ylim = c(-10.00, 60.00), expand = FALSE)
+```
+
+## Conclusiones
+
+La conclusión es que China e Índia són el epicentro de la producción del arroz, pero esto se ve amenazado por el cambio climático, puesto que los arrozales se encuentran prácticamente al nivel del mar, y una subida de éste puede inundar los cultivos y causar una verdadera emergéncia alimentaria.
+
+# ¿CUÁL ES LA DISTRIBUCIÓN GEOGRÁFICA DEL ACEITE DE PALMA?
+
+## ¿Por qué esta pregunta?
+
+El aceite de palma es un producto presente en multitud de productos de consumo cuotidiano, esto ha generado un boom enorme de plantación de su fruto, la palma.
+
+## Tidy de la pregunta
+
+El tidy es el mismo que el del mapa anterior, con la única diferencia del filtrado por el cultivo de la palma.
+
+```{r tidy gg}
+df_p_pa <- df_p %>% filter(item == "Oil palm fruit", production >= 0,
+                           item_code < 1000, area_code < 5000)
+
+df_world <- left_join(world, df_p_pa, by = c("subunit" = "area")) %>%
+  mutate(production = production/1000000)
+
+df_world2 <- inner_join(world, df_p_pa, by = c("subunit" = "area2")) %>%
+  mutate(production = production/1000000)
+```
+
+## Representación de respuesta
+
+El plot es el mismo con la única diferencia de que hacemos zoom en Indonesia con *coord_sf()*.
+
+
+```{r plot gg}
+ggplot() + geom_sf(data = world, fill = "black") +
+  geom_sf(data = df_world, aes(geometry = geometry, fill = production)) +theme_void() +
+  theme(panel.background = element_rect(fill = "aliceblue")) +
+  geom_sf(data = df_world2, aes(geometry = geometry, fill = production)) +
+  transition_manual(year) +
+  labs(title="Producción de palma (millones de toneladas) Año: {current_frame}") +
+  scale_fill_viridis_c(option = "plasma") +
+  coord_sf(xlim = c(90.00, 170.00), ylim = c(-30.00, 30.00), expand = FALSE)
+```
+
+## Conclusiones
+
+La conclusión es que Indonesia es el productor hegemónico de palma, lo que provoca la deforestación de las selvas vírgenes de este país para la plantación del cultivo en cuestión, un proceso extremadamente perjudicial tanto para la lucha contra el cambio climático como para la enorme biodiversidad que reside en este entorno.
+
+# ¿TIENES CURIOSIDAD POR ALGO? ¡BÚSCALO!
+
+## ¿Por qué esta pregunta?
+
+Si te ha quedado una espinita clavada (por algo sobre el tema que te gustaría saber y no hemos explicado) este es el momento de sacártela...
+
+## Tidy de la pregunta
+
+Creamos un dataframe que esté *long* pero que muestre los datos de la manera que nos interesa para el `datatable`, es decir, con una columna para cada elemento `(item , area , yield , area_harvested , production)`. Para ello, unimos los *dataframes* `df_ah` , `df_p` y `df_y`.  Si estás leyendo el código, verás que hemos añadido una observación de un pueblo que merece ser considerado como País: "Pancrudo".
+
+```{r tidy fin}
+fin <- inner_join(df_ah , df_p , by = c("area_code" = "area_code" , "area" = "area" , "item_code" = "item_code" , "item" = "item" , "year" = "year"))
+fin <- inner_join(df_y , fin ,  by = c("area_code" = "area_code" , "area" = "area" , "item_code" = "item_code" , "item" = "item" , "year" = "year"))
+fin1 <- fin %>% filter(year == 2017) %>%
+  select(item , area , yield , area_harvested , production) %>%
+  add_row(item = "Raw Bread (Pan crudo)", area = "Pancrudo" , yield = 104 , area_harvested = 1248 , production = 1.234)
+```
+
+## Representación de respuesta
+
+Realizamos un `datatable` para representar esta tabla que hemos creado poniendo los nombres visibles de las columnas en Castellano para que sea más "entendible". Quitamos la leyenda, ponemos la opción para que apretando al nombre de las columnas te salgan las observaciones ordenadas `filter = c("none", "bottom", "top")`, finalmente añadimos varias opciones que hacen que, entre otras cosas, se vea como se ve, que cuando se busque, busque "nada", "una columna", o "en varias".
+
+```{r plot fin}
+datatable(data = fin1 , options = list(), class = "display",
+    callback = JS("return table;"), rownames = FALSE , colnames = c('Cultivo (en inglés)', 'País/Región (en inglés)', 'Rendimiento (en hg/ha)' , 'Area cultivada (en hectáreas)' , 'Producción (en toneladas)') ,
+    caption = NULL, filter = c("none", "bottom", "top"), escape = FALSE,
+    style = "jqueryui", width = NULL, height = NULL, elementId = NULL,
+    fillContainer = getOption("DT.fillContainer", NULL),
+    autoHideNavigation = getOption("DT.autoHideNavigation", NULL),
+    selection = c("multiple", "single", "none"), extensions = list(),
+    plugins = "natural", editable = FALSE)
+```
+
+# CONCLUSIONES FINALES
+
+Las conclusiones finales tendran una doble vertiente. Por un lado respecto al dessarrollo del trabajo y de R, y por el otro respecto a los resultados obtenidos en el análisis realizado.
+
+Respecto a al desarrollo del trabajo y R, hemoms llegado a la conclusión que efectivamente la parte más árdua y larga es el *tidy* (también la más aburrida), pero que una vez hecho, utilizar esos datos ordenados para obtener gráficas y mapas puede considerarse un juego divertido. También que en R todo importa, ya no solo una palabra, una letra, sinó incluso un caracter, cómo un acento puede hacer que el resultado final no sea un bonito gráfico, sino un error "incomprensible". Así mismo, que hay que tener presente que el nombre de los países importan, y por eso los *area_code* dan mejores resultados que el nombre del país en sí, pero también hay que tener presente la creación y disolución de estados, hecho bastante común en el siglo XX y que hacía que nuestros datos para *Russia Federation*, solo aparecían des del 1992, justo después de la caída de la URSS: Qué casualidad!  En definitiva, hemos aporendido que con trabajo y utilizando todos los recursos a nuestro alcance se conguigue ir superando error tras error, e ir familiarizándonos con este nuevo lenguaje y este nuevo mundo que es la programación con R. 
+
+Respecto al análisis de los datos obtenidos, hemos llegado a la conclución que sin lugar a dudas a nivel mundial hay producción de alimento más que suficiente para alimentar de manera sana y equilibrada a los 8000 seres humanos que vivimos en el planeta. Que el problema no es de falta de producción sinó de distribución y acceso de los alimentos. Pero también a acceso y distribución de los avances agrários, los cuales muchos de ellos aíun no han llegado al continente africano. Así mismo, muchos de los avances de la revolución verde, cómo las semillas no se han adaptado a la geografía y clima de África, impidiendo que tengan la misma productividad que en otras regiones del planeta. Tambíen hemos evidenciado que cuando hablamos de seguridad alimentaria tampoco podemos dejar de lado el cambio climático y la emergéncia climática. El incremento de la temperatura global, la subida del nivel del mar, etc., va a perjudicar sin ninguna duda tanto a la productividad cómo a la extensión de suelo cultivable. Cómo hemos visto en el mapa de la producción de arroz en el sudeste asiático, la seguridad alimentaria de cientos de millones de personas en índia y China depende del cambio climático y especialmente a causa del incremento del nivel del mar.
+
+En definitiva, todo ello nos indica que se puede resolver perfectamente el problema del hambre en el mundo, pero lo que hace falta es voluntad política, exactamente la misma que hace falta para hacer frente a la emergéncia climática, que tal y cómo hemos visto, tiene mucha más vinculación con el problema de la alimentación del que a simple vista podemos vislumbrar.
+
+
+"En R un caracter lo cambia todo, pero un gesto puede cambiar el mundo". 
+Andreu Balastegui, Gerard Blasco i Albert Gastaldo.
