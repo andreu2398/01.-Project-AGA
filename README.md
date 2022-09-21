@@ -1,4 +1,4 @@
-# 1. Project-AGA (University project)
+# 01. Project-AGA (University project)
 
 Aquest és un treball fet per Albert, Andreu i Gerard, per a la classe de "Programació" d'Economia de la Universitat de València.
 Realitzem un xicotet anàlisi sobre els cultius a nivell mundial des del 1961 fins al 2017 amb dades de la FAO.
